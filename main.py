@@ -36,6 +36,19 @@ HTML = """
 
 <div class="row mb-3">
   <div class="col">
+    <input class="form-control" type="date" name="date_depart" required>
+  </div>
+  <div class="col">
+    <input class="form-control" type="time" name="heure_depart" required>
+  </div>
+  <div class="col">
+    <input class="form-control" type="text" name="numero_embarcation"
+           placeholder="Numéro embarcation" required>
+  </div>
+</div>
+
+<div class="row mb-3">
+  <div class="col">
     <input class="form-control" type="number" step="0.1"
            name="ambient_temp" placeholder="Température ambiante (°C)" required>
   </div>
@@ -121,9 +134,16 @@ def upload():
     try:
         file = request.files["file"]
         ambient_temp = float(request.form["ambient_temp"])
+        date_depart = request.form["date_depart"]
+        heure_depart = request.form["heure_depart"]
+        numero = request.form["numero_embarcation"]
 
         df = pd.read_csv(file, skiprows=19)
         df = analyze_dataframe(df, ambient_temp)
+
+        df.insert(0, "Date départ", date_depart)
+        df.insert(1, "Heure départ", heure_depart)
+        df.insert(2, "Numéro embarcation", numero)
 
         rows = df[df["DEBUT_TRICHE"]]
         etat = "PASS"
@@ -153,3 +173,5 @@ def upload():
 def download():
     fname = request.args.get("fname")
     return send_file(os.path.join(UPLOAD_DIR, fname), as_attachment=True)
+
+
