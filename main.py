@@ -75,13 +75,14 @@ def analyze_dataframe(df, ambient_temp):
         if col not in df.columns:
             raise ValueError(f"Colonne manquante : {col}")
 
-    # 🔒 Conversion stricte en numérique
-    for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="ignore")
-
+    # Conversion stricte
     df["TPS (Main)"] = pd.to_numeric(df["TPS (Main)"], errors="coerce")
+    df["Fuel Pressure"] = pd.to_numeric(df["Fuel Pressure"], errors="coerce")
+    df["IAT"] = pd.to_numeric(df["IAT"], errors="coerce")
+    df["ECT"] = pd.to_numeric(df["ECT"], errors="coerce")
     df["Section Time"] = pd.to_numeric(df["Section Time"], errors="coerce")
-    df = df.dropna(subset=["TPS (Main)", "Section Time"])
+
+    df = df.dropna(subset=REQUIRED)
 
     # Lambda
     lambda_cols = [c for c in df.columns if "lambda" in c.lower()]
@@ -90,21 +91,25 @@ def analyze_dataframe(df, ambient_temp):
 
     df["Lambda"] = df[lambda_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
 
-    # 🔒 FORCER DES BOOLÉENS
-    df["TPS_ACTIVE"] = (df["TPS (Main)"] >= CFG["TPS_MIN"]).astype(bool)
-    df["Lambda_OK"] = df["Lambda"].between(*CFG["LAMBDA_RANGE"]).astype(bool)
-    df["Fuel_OK"] = df["Fuel Pressure"].between(*CFG["FUEL_RANGE"]).astype(bool)
-    df["IAT_OK"] = (df["IAT"] <= ambient_temp + CFG["AMBIENT_OFFSET"]).astype(bool)
-    df["ECT_OK"] = (df["ECT"] <= ambient_temp + CFG["AMBIENT_OFFSET"]).astype(bool)
+    # ===== FLAGS BOOLÉENS (CRITIQUE) =====
+    df["TPS_ACTIVE"] = (df["TPS (Main)"] >= CFG["TPS_MIN"])
+    df["Lambda_OK"] = df["Lambda"].between(*CFG["LAMBDA_RANGE"])
+    df["Fuel_OK"] = df["Fuel Pressure"].between(*CFG["FUEL_RANGE"])
+    df["IAT_OK"] = df["IAT"] <= ambient_temp + CFG["AMBIENT_OFFSET"]
+    df["ECT_OK"] = df["ECT"] <= ambient_temp + CFG["AMBIENT_OFFSET"]
 
-    # ✅ ICI EST LA CORRECTION CRITIQUE
+    # ⚠️ FORÇAGE EN BOOL
+    for c in ["TPS_ACTIVE", "Lambda_OK", "Fuel_OK", "IAT_OK", "ECT_OK"]:
+        df[c] = df[c].astype(bool)
+
     ok_all = (
         df["Lambda_OK"] &
         df["Fuel_OK"] &
         df["IAT_OK"] &
         df["ECT_OK"]
-    ).astype(bool)
+    )
 
+    # ✅ PLUS AUCUN ~ SUR FLOAT
     df["OUT_RAW"] = df["TPS_ACTIVE"] & (~ok_all)
 
     # Temps
@@ -114,15 +119,15 @@ def analyze_dataframe(df, ambient_temp):
     debut = []
 
     for out, dt in zip(df["OUT_RAW"], df["dt"]):
-        if bool(out):
+        if out:
             acc += float(dt)
             debut.append(acc >= CFG["CHEAT_DELAY_SEC"])
         else:
             acc = 0.0
             debut.append(False)
 
-    df["Début_triche"] = debut
-    df["QUALIFIÉ"] = ~pd.Series(debut, dtype=bool).rolling(2).max().fillna(False)
+    df["Début_triche"] = pd.Series(debut, dtype=bool)
+    df["QUALIFIÉ"] = ~df["Début_triche"].rolling(2).max().fillna(False)
 
     return df
 
@@ -145,12 +150,21 @@ def upload():
             t = df.loc[df["Début_triche"], "Section Time"].iloc[0]
             etat = f"CHEAT – Début à {t:.2f} s"
 
-        table = df.head(80).to_html(classes="table table-dark table-striped", index=False)
+        table = df.head(80).to_html(
+            classes="table table-dark table-striped",
+            index=False
+        )
 
-        return render_template_string(HTML, table=table, etat_global=etat)
+        return render_template_string(
+            HTML,
+            table=table,
+            etat_global=etat
+        )
 
     except Exception as e:
         return f"<h2>Erreur</h2><pre>{e}</pre>", 500
+
+
 
 
 
